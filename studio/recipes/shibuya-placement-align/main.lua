@@ -1,0 +1,297 @@
+--!strict
+-- Aligns the existing top-level Shibuya MeshParts to authoritative Blender/CSV placement data.
+-- This transform is update-only: it creates, deletes, and reparents nothing, and ignores all
+-- non-target instances (including PROBE_NATIVE_SIZE). Re-running converges to the same values.
+--
+-- Static Blender bbox conversion (meters -> OVERDARE centimeters, Blender Z-up -> OVERDARE Y-up):
+--   center = ( ((minX+maxX)/2)*100, ((minZ+maxZ)/2)*100, ((minY+maxY)/2)*100 )
+--   size   = ( (maxX-minX)*100,     (maxZ-minZ)*100,     (maxY-minY)*100 )
+-- Static rotation is identity. Preview X/Z and yaw come directly from CSV; preview Y is
+-- CSV Y + master bbox Z-center*100. Preview size uses the same Blender-axis conversion.
+
+local ShibuyaPlacementAlign = {}
+
+local staticTargets = {
+	{ name = "TERRAIN_01", position = Vector3.new(-30811, 2341.5, 0), size = Vector3.new(124122, 2743, 125206) },
+	{ name = "TERRAIN_02", position = Vector3.new(0, 2449.5, 0), size = Vector3.new(185744, 2919, 185744) },
+	{ name = "TERRAIN_03", position = Vector3.new(-41061, 2170, -30436), size = Vector3.new(103622, 1820, 124872) },
+	{ name = "TERRAIN_04", position = Vector3.new(-15301.5, 2254, 0), size = Vector3.new(94603, 2564, 185744) },
+	{ name = "TERRAIN_05", position = Vector3.new(35811, 1773.5, 0), size = Vector3.new(114122, 1637, 185744) },
+	{ name = "TERRAIN_06", position = Vector3.new(15134.5, 2278.5, 0), size = Vector3.new(155475, 2501, 125206) },
+	{ name = "TERRAIN_07", position = Vector3.new(20676.5, 1862.5, 0), size = Vector3.new(83853, 1741, 125206) },
+	{ name = "BUILDINGS_01", position = Vector3.new(-956.5, 6866, -588), size = Vector3.new(63323, 11330, 63686) },
+	{ name = "BUILDINGS_02", position = Vector3.new(486, 7188.5, 2338.5), size = Vector3.new(66628, 11265, 67289) },
+	{ name = "BUILDINGS_03", position = Vector3.new(-138.5, 4792.5, 45), size = Vector3.new(64373, 6187, 64586) },
+	{ name = "BUILDINGS_04", position = Vector3.new(-1917, 7211.5, 1879.5), size = Vector3.new(62126, 11443, 71077) },
+	{ name = "BUILDINGS_05", position = Vector3.new(56.5, 5220.5, 1820), size = Vector3.new(66095, 7663, 68326) },
+	{ name = "BUILDINGS_06", position = Vector3.new(-1264.5, 4489, -623), size = Vector3.new(62263, 6364, 61268) },
+	{ name = "BUILDINGS_07", position = Vector3.new(642, 5214.5, -5186.5), size = Vector3.new(66068, 7653, 56241) },
+	{ name = "BUILDINGS_08", position = Vector3.new(-888, 4993.5, 74), size = Vector3.new(62380, 7129, 64226) },
+	{ name = "BUILDINGS_09", position = Vector3.new(-246.5, 4186, -1653), size = Vector3.new(62239, 5638, 59152) },
+	{ name = "BUILDINGS_10", position = Vector3.new(778, 3976, -774.5), size = Vector3.new(66044, 5522, 66905) },
+	{ name = "BUILDINGS_11", position = Vector3.new(408, 4149, -64), size = Vector3.new(62578, 5702, 62092) },
+	{ name = "BUILDINGS_12", position = Vector3.new(593.5, 3761, -173), size = Vector3.new(66181, 4762, 64526) },
+	{ name = "BUILDINGS_13", position = Vector3.new(460.5, 3775.5, 843.5), size = Vector3.new(65461, 5245, 63797) },
+	{ name = "BUILDINGS_14", position = Vector3.new(-489.5, 4919.5, -546), size = Vector3.new(63803, 7529, 63580) },
+	{ name = "BUILDINGS_15", position = Vector3.new(563, 4221, 339), size = Vector3.new(65762, 5604, 64908) },
+	{ name = "BUILDINGS_16", position = Vector3.new(-1777, 3435.5, 158), size = Vector3.new(61418, 4403, 65224) },
+	{ name = "BUILDINGS_17", position = Vector3.new(163.5, 3708.5, 252), size = Vector3.new(64755, 4713, 64460) },
+	{ name = "ROADS_01", position = Vector3.new(22, 2272, -7.5), size = Vector3.new(64272, 2150, 64299) },
+	{ name = "ROADS_02", position = Vector3.new(22, 2265.5, -8), size = Vector3.new(64272, 2137, 64298) },
+	{ name = "FRN_01", position = Vector3.new(20225.5, 2076, 3807.5), size = Vector3.new(12237, 1214, 44401) },
+	{ name = "FRN_02", position = Vector3.new(-8.5, 2894.5, 145), size = Vector3.new(62899, 2565, 62594) },
+	{ name = "FRN_03", position = Vector3.new(20261, 1985, 3204.5), size = Vector3.new(12122, 1034, 43899) },
+	{ name = "FRN_04", position = Vector3.new(18760, 2213.5, 6261.5), size = Vector3.new(9544, 1337, 38837) },
+	{ name = "NEON", position = Vector3.new(-147.5, 3781.5, 145), size = Vector3.new(63873, 2657, 63618) },
+	{ name = "LANDMARKS_01", position = Vector3.new(2989.5, 13136, -8333), size = Vector3.new(51517, 24426, 42636) },
+	{ name = "LANDMARKS_02", position = Vector3.new(5553.5, 10853.5, -7962), size = Vector3.new(56633, 18621, 41894) },
+	{ name = "LANDMARKS_03", position = Vector3.new(8808.5, 7002, -8447), size = Vector3.new(49837, 11054, 23290) },
+	{ name = "LANDMARKS_04", position = Vector3.new(-541, 2661.5, -2685), size = Vector3.new(44198, 1945, 40898) },
+	{ name = "LANDMARKS_05", position = Vector3.new(18926.5, 10737, -1788.5), size = Vector3.new(29887, 18678, 54087) },
+	{ name = "VIADUCT", position = Vector3.new(6632, 3132.5, -24831.5), size = Vector3.new(67774, 3215, 23013) },
+	{ name = "STATION", position = Vector3.new(-2752.5, 2587.5, -182.5), size = Vector3.new(52505, 2801, 63967) },
+	{ name = "OUTSKIRTS", position = Vector3.new(2576, 6636.5, -391), size = Vector3.new(179414, 11423, 184356) },
+}
+
+local previewTargets = {
+	{ name = "GR_TactilePaving_Bar_A_0001", position = Vector3.new(1551.3, 1517.6, -1079), cosYaw = -0.9916936263511843, sinYaw = -0.1286225153479654 },
+	{ name = "GR_TactilePaving_Bar_A_0002", position = Vector3.new(1522.1, 1517.9, -1075.9), cosYaw = -0.9916936263511843, sinYaw = -0.1286225153479654 },
+	{ name = "GR_TactilePaving_Bar_A_0003", position = Vector3.new(1493, 1518.2, -1072.9), cosYaw = -0.9916936263511843, sinYaw = -0.1286225153479654 },
+	{ name = "GR_TactilePaving_Bar_A_0004", position = Vector3.new(1463.9, 1518.5, -1069.9), cosYaw = -0.9916936263511843, sinYaw = -0.1286225153479654 },
+	{ name = "GR_TactilePaving_Bar_A_0005", position = Vector3.new(1434.8, 1518.9, -1067.3), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0006", position = Vector3.new(1405.5, 1519.2, -1068.2), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0007", position = Vector3.new(1376.2, 1519.6, -1069.2), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0008", position = Vector3.new(1347, 1520, -1070.1), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0009", position = Vector3.new(1317.9, 1520.3, -1071.1), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0010", position = Vector3.new(1288.8, 1520.7, -1072.2), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0011", position = Vector3.new(1259.8, 1521, -1073.2), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0012", position = Vector3.new(1230.9, 1521.4, -1074.3), cosYaw = -0.99999048072073449, sinYaw = 0.0043633092847464219 },
+	{ name = "GR_TactilePaving_Bar_A_0013", position = Vector3.new(1202.3, 1521.7, -1077.8), cosYaw = -0.98665754363973823, sinYaw = 0.16280937190099956 },
+	{ name = "GR_TactilePaving_Bar_A_0014", position = Vector3.new(1173.8, 1522.1, -1083.5), cosYaw = -0.98665754363973823, sinYaw = 0.16280937190099956 },
+	{ name = "GR_TactilePaving_Bar_A_0015", position = Vector3.new(1145.4, 1522.4, -1089.2), cosYaw = -0.98665754363973823, sinYaw = 0.16280937190099956 },
+	{ name = "GR_TactilePaving_Bar_A_0016", position = Vector3.new(1117.1, 1522.8, -1095), cosYaw = -0.98665754363973823, sinYaw = 0.16280937190099956 },
+	{ name = "GR_TactilePaving_Bar_A_0017", position = Vector3.new(1089, 1523.1, -1100.7), cosYaw = -0.98665754363973823, sinYaw = 0.16280937190099956 },
+	{ name = "GR_TactilePaving_Bar_A_0018", position = Vector3.new(1061, 1523.5, -1106.5), cosYaw = -0.98665754363973823, sinYaw = 0.16280937190099956 },
+	{ name = "GR_TactilePaving_Bar_A_0019", position = Vector3.new(1033.1, 1523.8, -1112.2), cosYaw = -0.98665754363973823, sinYaw = 0.16280937190099956 },
+	{ name = "GR_TactilePaving_Bar_A_0020", position = Vector3.new(1006.2, 1524.2, -1121.6), cosYaw = -0.94517712304900969, sinYaw = 0.32655812050046645 },
+	{ name = "GR_TactilePaving_Bar_A_0021", position = Vector3.new(979.6, 1524.4, -1132.1), cosYaw = -0.94517712304900969, sinYaw = 0.32655812050046645 },
+	{ name = "GR_TactilePaving_Bar_A_0022", position = Vector3.new(953.2, 1524.7, -1142.5), cosYaw = -0.94517712304900969, sinYaw = 0.32655812050046645 },
+	{ name = "GR_TactilePaving_Bar_A_0023", position = Vector3.new(927, 1524.9, -1152.9), cosYaw = -0.94517712304900969, sinYaw = 0.32655812050046645 },
+	{ name = "GR_TactilePaving_Bar_A_0024", position = Vector3.new(900.9, 1525.2, -1163.3), cosYaw = -0.94517712304900969, sinYaw = 0.32655812050046645 },
+	{ name = "GR_TactilePaving_Bar_A_0025", position = Vector3.new(875, 1525.4, -1173.5), cosYaw = -0.94517712304900969, sinYaw = 0.32655812050046645 },
+	{ name = "GR_TactilePaving_Bar_A_0026", position = Vector3.new(851.4, 1525.6, -1188.7), cosYaw = -0.86242533651776976, sinYaw = 0.50618429344677573 },
+	{ name = "GR_TactilePaving_Bar_A_0027", position = Vector3.new(828.1, 1525.9, -1204.1), cosYaw = -0.86242533651776976, sinYaw = 0.50618429344677573 },
+	{ name = "GR_TactilePaving_Bar_A_0028", position = Vector3.new(805, 1526.1, -1219.3), cosYaw = -0.86242533651776976, sinYaw = 0.50618429344677573 },
+	{ name = "GR_TactilePaving_Bar_A_0029", position = Vector3.new(782.1, 1526.3, -1234.3), cosYaw = -0.86242533651776976, sinYaw = 0.50618429344677573 },
+	{ name = "GR_TactilePaving_Bar_A_0030", position = Vector3.new(759.4, 1526.6, -1249.1), cosYaw = -0.86242533651776976, sinYaw = 0.50618429344677573 },
+	{ name = "GR_TactilePaving_Bar_A_0031", position = Vector3.new(738.6, 1526.8, -1266.4), cosYaw = -0.75425138073610387, sinYaw = 0.65658575575295641 },
+	{ name = "GR_TactilePaving_Bar_A_0032", position = Vector3.new(719.2, 1527, -1285.3), cosYaw = -0.75425138073610387, sinYaw = 0.65658575575295641 },
+	{ name = "GR_TactilePaving_Bar_A_0033", position = Vector3.new(699.9, 1527.1, -1303.8), cosYaw = -0.75425138073610387, sinYaw = 0.65658575575295641 },
+	{ name = "GR_TactilePaving_Bar_A_0034", position = Vector3.new(680.7, 1527.3, -1321.9), cosYaw = -0.75425138073610387, sinYaw = 0.65658575575295641 },
+	{ name = "GR_TactilePaving_Bar_A_0035", position = Vector3.new(661.5, 1527.5, -1339.7), cosYaw = -0.75425138073610387, sinYaw = 0.65658575575295641 },
+	{ name = "GR_TactilePaving_Bar_A_0036", position = Vector3.new(642.1, 1527.6, -1357.1), cosYaw = -0.75425138073610387, sinYaw = 0.65658575575295641 },
+	{ name = "GR_TactilePaving_Bar_A_0037", position = Vector3.new(624.2, 1527.8, -1375.7), cosYaw = -0.64918257701390603, sinYaw = 0.7606326194041273 },
+	{ name = "GR_TactilePaving_Bar_A_0038", position = Vector3.new(607.6, 1528, -1395.6), cosYaw = -0.64918257701390603, sinYaw = 0.7606326194041273 },
+	{ name = "GR_TactilePaving_Bar_A_0039", position = Vector3.new(590.8, 1528.1, -1415.3), cosYaw = -0.64918257701390603, sinYaw = 0.7606326194041273 },
+	{ name = "GR_TactilePaving_Bar_A_0040", position = Vector3.new(573.6, 1528.3, -1434.7), cosYaw = -0.64918257701390603, sinYaw = 0.7606326194041273 },
+	{ name = "GR_TactilePaving_Bar_A_0041", position = Vector3.new(556.1, 1528.5, -1454.1), cosYaw = -0.64918257701390603, sinYaw = 0.7606326194041273 },
+	{ name = "GR_TactilePaving_Bar_A_0042", position = Vector3.new(538.3, 1528.6, -1473.4), cosYaw = -0.64918257701390603, sinYaw = 0.7606326194041273 },
+	{ name = "GR_TactilePaving_Bar_A_0043", position = Vector3.new(520, 1528.8, -1492.9), cosYaw = -0.64918257701390603, sinYaw = 0.7606326194041273 },
+	{ name = "GR_TactilePaving_Bar_A_0044", position = Vector3.new(504, 1529, -1514.2), cosYaw = -0.55644064117691949, sinYaw = 0.83088736471715507 },
+	{ name = "GR_TactilePaving_Bar_A_0045", position = Vector3.new(487.9, 1529.1, -1535.8), cosYaw = -0.55644064117691949, sinYaw = 0.83088736471715507 },
+	{ name = "GR_TactilePaving_Bar_A_0046", position = Vector3.new(471.6, 1529.3, -1557.6), cosYaw = -0.55644064117691949, sinYaw = 0.83088736471715507 },
+	{ name = "GR_TactilePaving_Bar_A_0047", position = Vector3.new(455.1, 1529.5, -1579.6), cosYaw = -0.55644064117691949, sinYaw = 0.83088736471715507 },
+	{ name = "GR_TactilePaving_Bar_A_0048", position = Vector3.new(440.4, 1529.6, -1602.8), cosYaw = -0.38992768778818837, sinYaw = 0.92084548014102618 },
+	{ name = "GR_TactilePaving_Bar_A_0049", position = Vector3.new(428.5, 1529.8, -1627.7), cosYaw = -0.38992768778818837, sinYaw = 0.92084548014102618 },
+	{ name = "GR_TactilePaving_Bar_A_0050", position = Vector3.new(416.4, 1529.9, -1652.7), cosYaw = -0.38992768778818837, sinYaw = 0.92084548014102618 },
+	{ name = "GR_TactilePaving_Bar_A_0051", position = Vector3.new(404.3, 1530.1, -1677.9), cosYaw = -0.38992768778818837, sinYaw = 0.92084548014102618 },
+	{ name = "GR_TactilePaving_Bar_A_0052", position = Vector3.new(392, 1530.3, -1703.3), cosYaw = -0.38992768778818837, sinYaw = 0.92084548014102618 },
+	{ name = "GR_TactilePaving_Bar_A_0053", position = Vector3.new(379.7, 1530.4, -1728.9), cosYaw = -0.38992768778818837, sinYaw = 0.92084548014102618 },
+	{ name = "GR_TactilePaving_Bar_A_0054", position = Vector3.new(367.9, 1530.6, -1754.9), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0055", position = Vector3.new(357.8, 1530.7, -1781.6), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0056", position = Vector3.new(347.6, 1530.9, -1808.4), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0057", position = Vector3.new(337.4, 1531.1, -1835.4), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0058", position = Vector3.new(327.3, 1531.2, -1862.5), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0059", position = Vector3.new(317.1, 1531.4, -1889.8), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0060", position = Vector3.new(307, 1531.5, -1917.1), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0061", position = Vector3.new(296.8, 1531.7, -1944.5), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0062", position = Vector3.new(286.7, 1531.9, -1972.1), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0063", position = Vector3.new(276.6, 1532, -1999.7), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0064", position = Vector3.new(266.6, 1532.2, -2027.4), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0065", position = Vector3.new(256.6, 1532.4, -2055.1), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0066", position = Vector3.new(246.5, 1532.6, -2082.9), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0067", position = Vector3.new(236.6, 1532.8, -2110.8), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0068", position = Vector3.new(226.6, 1533, -2138.7), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0069", position = Vector3.new(216.7, 1533.1, -2166.6), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0070", position = Vector3.new(206.7, 1533.3, -2194.6), cosYaw = -0.31432384884290376, sinYaw = 0.94931581575816137 },
+	{ name = "GR_TactilePaving_Bar_A_0071", position = Vector3.new(197.6, 1533.5, -2222.9), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0072", position = Vector3.new(188.5, 1533.7, -2251.2), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0073", position = Vector3.new(179.5, 1534.2, -2279.5), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0074", position = Vector3.new(170.4, 1534.7, -2307.8), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0075", position = Vector3.new(161.4, 1535.2, -2336.2), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0076", position = Vector3.new(152.4, 1535.7, -2364.6), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0077", position = Vector3.new(143.4, 1536.2, -2393), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0078", position = Vector3.new(134.4, 1536.7, -2421.5), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0079", position = Vector3.new(125.5, 1537.2, -2449.9), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0080", position = Vector3.new(116.5, 1537.7, -2478.4), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0081", position = Vector3.new(107.6, 1538.5, -2506.9), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0082", position = Vector3.new(98.7, 1540.1, -2535.4), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0083", position = Vector3.new(89.8, 1541.8, -2563.9), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0084", position = Vector3.new(80.9, 1543.4, -2592.4), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0085", position = Vector3.new(72, 1545, -2621), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0086", position = Vector3.new(63.1, 1546.6, -2649.5), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0087", position = Vector3.new(54.2, 1548.3, -2678.1), cosYaw = -0.2870261592258036, sinYaw = 0.95792274423362744 },
+	{ name = "GR_TactilePaving_Bar_A_0088", position = Vector3.new(46.6, 1549.8, -2705.9), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0089", position = Vector3.new(75.3, 1550.1, -2711.2), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0090", position = Vector3.new(104, 1550.4, -2716.6), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0091", position = Vector3.new(132.6, 1550.7, -2721.9), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0092", position = Vector3.new(161.2, 1551, -2727.3), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0093", position = Vector3.new(189.8, 1551.3, -2732.7), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0094", position = Vector3.new(218.4, 1551.5, -2738.1), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0095", position = Vector3.new(247, 1551.8, -2743.5), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0096", position = Vector3.new(275.5, 1551.9, -2748.9), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0097", position = Vector3.new(304, 1551.9, -2754.4), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0098", position = Vector3.new(332.5, 1552, -2759.8), cosYaw = 0.98081931514942311, sinYaw = 0.1949191397216205 },
+	{ name = "GR_TactilePaving_Bar_A_0099", position = Vector3.new(359.5, 1549.4, -2719.6), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0100", position = Vector3.new(367.9, 1547.8, -2690.8), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0101", position = Vector3.new(376.4, 1546.2, -2662), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0102", position = Vector3.new(384.8, 1544.6, -2633.3), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0103", position = Vector3.new(393.3, 1543, -2604.5), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0104", position = Vector3.new(401.7, 1541.3, -2575.7), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0105", position = Vector3.new(410.2, 1539.6, -2547), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0106", position = Vector3.new(418.7, 1537.9, -2518.2), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0107", position = Vector3.new(427.1, 1536.6, -2489.4), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0108", position = Vector3.new(435.6, 1536.1, -2460.7), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0109", position = Vector3.new(444.1, 1535.6, -2431.9), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0110", position = Vector3.new(452.6, 1535.1, -2403.2), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0111", position = Vector3.new(461.1, 1534.6, -2374.4), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0112", position = Vector3.new(469.7, 1534.1, -2345.7), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0113", position = Vector3.new(478.2, 1533.6, -2317), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0114", position = Vector3.new(486.7, 1533.1, -2288.3), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0115", position = Vector3.new(495.3, 1532.6, -2259.6), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0116", position = Vector3.new(503.9, 1532.3, -2230.9), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0117", position = Vector3.new(512.5, 1532.1, -2202.2), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0118", position = Vector3.new(521.1, 1531.9, -2173.5), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0119", position = Vector3.new(529.8, 1531.7, -2144.9), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0120", position = Vector3.new(538.5, 1531.6, -2116.2), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0121", position = Vector3.new(547.2, 1531.4, -2087.6), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0122", position = Vector3.new(556, 1531.2, -2059), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0123", position = Vector3.new(564.7, 1531, -2030.4), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0124", position = Vector3.new(573.6, 1530.8, -2001.9), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0125", position = Vector3.new(582.5, 1530.6, -1973.4), cosYaw = 0.277650011593084, sinYaw = -0.9606822945502641 },
+	{ name = "GR_TactilePaving_Bar_A_0126", position = Vector3.new(592.4, 1530.5, -1945.3), cosYaw = 0.40178795726384564, sinYaw = -0.91573273251410325 },
+	{ name = "GR_TactilePaving_Bar_A_0127", position = Vector3.new(604.8, 1530.3, -1918.1), cosYaw = 0.40178795726384564, sinYaw = -0.91573273251410325 },
+	{ name = "GR_TactilePaving_Bar_A_0128", position = Vector3.new(617.3, 1530.1, -1890.9), cosYaw = 0.40178795726384564, sinYaw = -0.91573273251410325 },
+	{ name = "GR_TactilePaving_Bar_A_0129", position = Vector3.new(629.8, 1529.9, -1863.7), cosYaw = 0.40178795726384564, sinYaw = -0.91573273251410325 },
+	{ name = "GR_TactilePaving_Bar_A_0130", position = Vector3.new(642.4, 1529.7, -1836.6), cosYaw = 0.40178795726384564, sinYaw = -0.91573273251410325 },
+	{ name = "GR_TactilePaving_Bar_A_0131", position = Vector3.new(655.1, 1529.6, -1809.6), cosYaw = 0.40178795726384564, sinYaw = -0.91573273251410325 },
+	{ name = "GR_TactilePaving_Bar_A_0132", position = Vector3.new(670.4, 1529.4, -1783.9), cosYaw = 0.54829322951991388, sinYaw = -0.83628615584775945 },
+	{ name = "GR_TactilePaving_Bar_A_0133", position = Vector3.new(687.1, 1529.2, -1759), cosYaw = 0.54829322951991388, sinYaw = -0.83628615584775945 },
+	{ name = "GR_TactilePaving_Bar_A_0134", position = Vector3.new(703.8, 1529, -1734.1), cosYaw = 0.54829322951991388, sinYaw = -0.83628615584775945 },
+	{ name = "GR_TactilePaving_Bar_A_0135", position = Vector3.new(720.6, 1528.8, -1709.3), cosYaw = 0.54829322951991388, sinYaw = -0.83628615584775945 },
+	{ name = "GR_TactilePaving_Bar_A_0136", position = Vector3.new(737.5, 1528.6, -1684.5), cosYaw = 0.54829322951991388, sinYaw = -0.83628615584775945 },
+	{ name = "GR_TactilePaving_Bar_A_0137", position = Vector3.new(756.6, 1528.4, -1661.6), cosYaw = 0.67880074553294178, sinYaw = -0.73432250943568556 },
+	{ name = "GR_TactilePaving_Bar_A_0138", position = Vector3.new(776.1, 1528.2, -1638.9), cosYaw = 0.67880074553294178, sinYaw = -0.73432250943568556 },
+	{ name = "GR_TactilePaving_Bar_A_0139", position = Vector3.new(794.9, 1527.9, -1615.8), cosYaw = 0.67880074553294178, sinYaw = -0.73432250943568556 },
+	{ name = "GR_TactilePaving_Bar_A_0140", position = Vector3.new(811.8, 1527.7, -1591.6), cosYaw = 0.67880074553294178, sinYaw = -0.73432250943568556 },
+	{ name = "GR_TactilePaving_Bar_A_0141", position = Vector3.new(818.6, 1527.5, -1564.8), cosYaw = 0.67880074553294178, sinYaw = -0.73432250943568556 },
+	{ name = "GR_TactilePaving_Bar_A_0142", position = Vector3.new(790.5, 1527.8, -1580.5), cosYaw = 0.79260900599599948, sinYaw = -0.60973023839566431 },
+	{ name = "GR_TactilePaving_Bar_A_0143", position = Vector3.new(841.2, 1527.4, -1573.5), cosYaw = 0.79260900599599948, sinYaw = -0.60973023839566431 },
+	{ name = "GR_TactilePaving_Bar_A_0144", position = Vector3.new(866.5, 1527.2, -1558), cosYaw = 0.89013328346759468, sinYaw = -0.45570027173921979 },
+	{ name = "GR_TactilePaving_Bar_A_0145", position = Vector3.new(893.1, 1526.9, -1544.1), cosYaw = 0.89013328346759468, sinYaw = -0.45570027173921979 },
+	{ name = "GR_TactilePaving_Bar_A_0146", position = Vector3.new(919.7, 1526.6, -1530.3), cosYaw = 0.89013328346759468, sinYaw = -0.45570027173921979 },
+	{ name = "GR_TactilePaving_Bar_A_0147", position = Vector3.new(946.4, 1526.4, -1516.5), cosYaw = 0.89013328346759468, sinYaw = -0.45570027173921979 },
+	{ name = "GR_TactilePaving_Bar_A_0148", position = Vector3.new(973.1, 1526.1, -1502.8), cosYaw = 0.89013328346759468, sinYaw = -0.45570027173921979 },
+	{ name = "GR_TactilePaving_Bar_A_0149", position = Vector3.new(1000.4, 1525.9, -1490.7), cosYaw = 0.95164803323513825, sinYaw = -0.3071905285644288 },
+	{ name = "GR_TactilePaving_Bar_A_0150", position = Vector3.new(1028.6, 1525.5, -1480.8), cosYaw = 0.95164803323513825, sinYaw = -0.3071905285644288 },
+	{ name = "GR_TactilePaving_Bar_A_0151", position = Vector3.new(1056.9, 1525.1, -1471.1), cosYaw = 0.95164803323513825, sinYaw = -0.3071905285644288 },
+	{ name = "GR_TactilePaving_Bar_A_0152", position = Vector3.new(1085.2, 1524.8, -1461.4), cosYaw = 0.95164803323513825, sinYaw = -0.3071905285644288 },
+	{ name = "GR_TactilePaving_Bar_A_0153", position = Vector3.new(1113.6, 1524.4, -1451.8), cosYaw = 0.95164803323513825, sinYaw = -0.3071905285644288 },
+	{ name = "GR_TactilePaving_Bar_A_0154", position = Vector3.new(1142.6, 1524.1, -1444.8), cosYaw = 0.98231993997639466, sinYaw = -0.18720987026535862 },
+	{ name = "GR_TactilePaving_Bar_A_0155", position = Vector3.new(1171.8, 1523.7, -1438.6), cosYaw = 0.98231993997639466, sinYaw = -0.18720987026535862 },
+	{ name = "GR_TactilePaving_Bar_A_0156", position = Vector3.new(1201, 1523.3, -1432.4), cosYaw = 0.98231993997639466, sinYaw = -0.18720987026535862 },
+	{ name = "GR_TactilePaving_Bar_A_0157", position = Vector3.new(1230.3, 1523, -1426.3), cosYaw = 0.98231993997639466, sinYaw = -0.18720987026535862 },
+	{ name = "GR_TactilePaving_Bar_A_0158", position = Vector3.new(1259.6, 1522.6, -1420.2), cosYaw = 0.98231993997639466, sinYaw = -0.18720987026535862 },
+	{ name = "GR_TactilePaving_Bar_A_0159", position = Vector3.new(1289.1, 1522.3, -1416.7), cosYaw = 0.99924945565909162, sinYaw = 0.038736615301406277 },
+	{ name = "GR_TactilePaving_Bar_A_0160", position = Vector3.new(1318.8, 1521.9, -1417), cosYaw = 0.99924945565909162, sinYaw = 0.038736615301406277 },
+	{ name = "GR_TactilePaving_Bar_A_0161", position = Vector3.new(1348.5, 1521.5, -1417.4), cosYaw = 0.99924945565909162, sinYaw = 0.038736615301406277 },
+	{ name = "GR_TactilePaving_Bar_A_0162", position = Vector3.new(1378.3, 1521.2, -1417.9), cosYaw = 0.99924945565909162, sinYaw = 0.038736615301406277 },
+	{ name = "GR_TactilePaving_Bar_A_0163", position = Vector3.new(1408.1, 1520.8, -1418.4), cosYaw = 0.99924945565909162, sinYaw = 0.038736615301406277 },
+	{ name = "GR_TactilePaving_Bar_A_0164", position = Vector3.new(1423.9, 1520.6, -1397), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0165", position = Vector3.new(1436.9, 1520.3, -1371.1), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0166", position = Vector3.new(1450, 1520, -1345.2), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0167", position = Vector3.new(1463.1, 1519.7, -1319.1), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0168", position = Vector3.new(1476.2, 1519.4, -1293), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0169", position = Vector3.new(1489.2, 1519.2, -1266.8), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0170", position = Vector3.new(1502.3, 1518.9, -1240.6), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0171", position = Vector3.new(1515.4, 1518.6, -1214.2), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0172", position = Vector3.new(1528.5, 1518.3, -1187.8), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0173", position = Vector3.new(1541.5, 1518.1, -1161.4), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0174", position = Vector3.new(1554.6, 1517.8, -1134.9), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0175", position = Vector3.new(1567.6, 1517.5, -1108.4), cosYaw = 0.42056082853921695, sinYaw = -0.90726434378212362 },
+	{ name = "GR_TactilePaving_Bar_A_0176", position = Vector3.new(2634.2, 1510.5, 1288.6), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0177", position = Vector3.new(2613.5, 1511, 1309), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0178", position = Vector3.new(2592.8, 1511.5, 1329.3), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0179", position = Vector3.new(2572.2, 1511.9, 1349.6), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0180", position = Vector3.new(2551.6, 1512.3, 1369.9), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0181", position = Vector3.new(2531.1, 1512.7, 1390.1), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0182", position = Vector3.new(2510.6, 1513.1, 1410.3), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0183", position = Vector3.new(2490.2, 1513.6, 1430.5), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0184", position = Vector3.new(2469.8, 1514, 1450.7), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0185", position = Vector3.new(2449.5, 1514.4, 1470.9), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0186", position = Vector3.new(2429.2, 1514.8, 1491.1), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0187", position = Vector3.new(2409, 1515.2, 1511.2), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0188", position = Vector3.new(2388.9, 1515.5, 1531.4), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0189", position = Vector3.new(2368.8, 1515.9, 1551.6), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0190", position = Vector3.new(2348.8, 1516.3, 1571.7), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0191", position = Vector3.new(2328.8, 1516.7, 1591.9), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0192", position = Vector3.new(2308.9, 1517.1, 1612.2), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0193", position = Vector3.new(2289, 1517.5, 1632.4), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0194", position = Vector3.new(2269.2, 1517.8, 1652.7), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0195", position = Vector3.new(2249.4, 1518.2, 1673.1), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0196", position = Vector3.new(2229.7, 1518.6, 1693.4), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0197", position = Vector3.new(2210, 1519, 1713.9), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0198", position = Vector3.new(2190.3, 1519.4, 1734.4), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0199", position = Vector3.new(2170.7, 1519.8, 1754.9), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+	{ name = "GR_TactilePaving_Bar_A_0200", position = Vector3.new(2151, 1520.2, 1775.5), cosYaw = -0.69766543094084665, sinYaw = -0.71642371992426568 },
+}
+
+local previewSize = Vector3.new(30, 2, 30)
+
+local function topLevelMeshPart(name: string)
+	local instance = workspace:FindFirstChild(name)
+	if instance and instance:IsA("MeshPart") then
+		return instance
+	end
+	return nil
+end
+
+local function yawFrame(position: Vector3, cosYaw: number, sinYaw: number)
+	-- CFrame.fromMatrix preserves CSV yaw as a pure world-Y rotation with no pitch or roll.
+	local right = Vector3.new(cosYaw, 0, -sinYaw)
+	local up = Vector3.yAxis
+	local back = Vector3.new(sinYaw, 0, cosYaw)
+	return CFrame.fromMatrix(position, right, up, back)
+end
+
+ShibuyaPlacementAlign.OnGenerate = function(parameters, targetContainer)
+	-- Only exact-name MeshParts directly under the injected Workspace target are eligible.
+	for _, target in staticTargets do
+		local meshPart = topLevelMeshPart(target.name)
+		if meshPart then
+			-- The procedural CFrame shim expects numeric XYZ arguments rather than a Vector3 overload.
+			meshPart.CFrame = CFrame.new(target.position.X, target.position.Y, target.position.Z)
+			meshPart.Size = target.size
+		end
+	end
+
+	for _, target in previewTargets do
+		local meshPart = topLevelMeshPart(target.name)
+		if meshPart then
+			meshPart.CFrame = yawFrame(target.position, target.cosYaw, target.sinYaw)
+			meshPart.Size = previewSize
+		end
+	end
+end
+
+return ShibuyaPlacementAlign
