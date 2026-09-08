@@ -11,11 +11,20 @@ Blender에서 만든 대형 씬을 **OVERDARE Studio**(Roblox 계열 UGC 플랫�
 | 항목 | 값 |
 |---|---|
 | FBX 1개당 트라이앵글 | **30,000** 이하 |
+| **FBX 1개당 메시 개수** | **200 이하** |
 | MeshPart 1개당 텍스처 | **1장** |
 | 텍스처 해상도 | 1024 px |
 | 축 / 단위 | **Y-up, cm** (Blender 1 m = 100 스터드) |
 | 좌표 매핑 | Blender `(x, y, z)` → OVERDARE `(X, Z, Y)` |
 | 방위 | Blender `+Y`(북) → OVERDARE `−Z` |
+
+메시 개수 제한은 트라이앵글 제한과 **별개로** 걸린다 — 임포터가 `Maximum allowed mesh count: 200`
+을 뱉는다. 머티리얼별로 잘게 쪼개진 유산 스캔에서 특히 쉽게 넘는다 (창덕궁 규장각은 감축 후에도
+서브메시 593개였다). `shibuya_export_v2.pack_files()` 의 `MAX_MESHES = 200` 이 이걸 반영하고 있다.
+
+> **뷰포트를 `RENDERED` 로 두지 마라.** 대형 씬에서 GPU 드라이버가 죽는다
+> (435만 tris × 패킹 텍스처 1,286장 → `nvoglv64.dll` `EXCEPTION_ACCESS_VIOLATION`).
+> **`SOLID` + `color_type='TEXTURE'`** 를 쓸 것.
 
 ## 임포트는 2단계다 — 이걸 구분 못 하면 반드시 망가진다
 
