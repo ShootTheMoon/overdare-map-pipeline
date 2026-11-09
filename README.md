@@ -6,6 +6,8 @@ Blender에서 만든 대형 씬을 **OVERDARE Studio**(Roblox 계열 UGC 플랫�
 베를린 냉전 맵 38개 에셋 → 262 FBX, 창덕궁 25 M 트라이앵글 유산 스캔, 시부야 PLATEAU LOD2 도시 데이터,
 조선 산곡 지형 맵을 전부 이 코드로 변환·배치했다. 실측으로 확인한 규칙과 함정만 담았다.
 
+2026-09 산곡 II 이관에서 새로 확인된 규칙(좌표 거울상, 알파 무시, 모바일 ±1 km, 에셋 유실 복구)은 **[docs/LESSONS_SANGOK2.md](docs/LESSONS_SANGOK2.md)**.
+
 ## OVERDARE 하드 룰 (지키지 않으면 임포트가 조용히 실패한다)
 
 | 항목 | 값 |
@@ -15,8 +17,9 @@ Blender에서 만든 대형 씬을 **OVERDARE Studio**(Roblox 계열 UGC 플랫�
 | MeshPart 1개당 텍스처 | **1장** |
 | 텍스처 해상도 | 1024 px |
 | 축 / 단위 | **Y-up, cm** (Blender 1 m = 100 스터드) |
-| 좌표 매핑 | Blender `(x, y, z)` → OVERDARE `(X, Z, Y)` |
+| 좌표 매핑 | Blender `(x, y, z)` → OVERDARE `(X, Z, −Y)` — **Z 부호 반전 필수.** `+Y` 그대로 쓰면 거울상이라 메시 내용과 배치가 남북으로 어긋난다 ([상세](docs/LESSONS_SANGOK2.md)) |
 | 방위 | Blender `+Y`(북) → OVERDARE `−Z` |
+| MeshPart 회전 | **모든 MeshPart yaw +180°** — Studio 가 임포트 메시를 Y축 180° 돌려 그린다 |
 
 메시 개수 제한은 트라이앵글 제한과 **별개로** 걸린다 — 임포터가 `Maximum allowed mesh count: 200`
 을 뱉는다. 머티리얼별로 잘게 쪼개진 유산 스캔에서 특히 쉽게 넘는다 (창덕궁 규장각은 감축 후에도
