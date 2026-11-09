@@ -8,6 +8,9 @@ Blender에서 만든 대형 씬을 **OVERDARE Studio**(Roblox 계열 UGC 플랫�
 
 2026-09 산곡 II 이관에서 새로 확인된 규칙(좌표 거울상, 알파 무시, 모바일 ±1 km, 에셋 유실 복구)은 **[docs/LESSONS_SANGOK2.md](docs/LESSONS_SANGOK2.md)**.
 
+지형을 걸어다니게 만드는 법(쿼드트리 슬랩, 슬랩 높이, `Shape` 기본값, `canQuery`)은 **[docs/TERRAIN_COLLISION.md](docs/TERRAIN_COLLISION.md)**,
+규약이 의심스러울 때 뭘 해보는가는 **[docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)**.
+
 ## OVERDARE 하드 룰 (지키지 않으면 임포트가 조용히 실패한다)
 
 | 항목 | 값 |
@@ -59,7 +62,8 @@ blender/terrain_seams/   지형 타일 이음선 제거 (화성·산옥에서 �
   hwaseong/*.py   월드 연속 베이크, 해석 노멀, 동일 바운드, ±15 cm 기복, .ovdrjm 교체
   sangok/*.py     지형+산벽 한 격자 재절단, 가장자리 색 마스크 블러
 studio/recipes/     Studio 안에서 도는 Luau 레시피 (정렬, 충돌 프록시, 배치 보정)
-docs/               임포트 절차서, 임포트 순서, 배치 스펙, 이음선 제거
+docs/               임포트 절차서·순서, 배치 스펙, 산곡 II 실측 규칙,
+                    이음선 제거, 지형 콜리전, 진단 기법
 ```
 
 ## 검증된 함정
