@@ -52,8 +52,11 @@ blender/heritage/   국가유산청 스캔 전용 파이프라인
   jsn_*.py, ovd_*.py    산곡: 해석적 지형 + 스캔 드레싱, 마스터/텍스처/배치 빌드
   ssw_live.py    소쇄원 (77 KB). KHS FBX 임포트(축 -Z/Y), OP 알파 배선,
                  height_at 기반 스캐터, 정점컬러 PBR — 이후 프로젝트가 재사용한 원본
+blender/terrain_seams/   지형 타일 이음선 제거 (화성·산옥에서 실제로 없앨 때까지 돌린 코드)
+  hwaseong/*.py   월드 연속 베이크, 해석 노멀, 동일 바운드, ±15 cm 기복, .ovdrjm 교체
+  sangok/*.py     지형+산벽 한 격자 재절단, 가장자리 색 마스크 블러
 studio/recipes/     Studio 안에서 도는 Luau 레시피 (정렬, 충돌 프록시, 배치 보정)
-docs/               임포트 절차서, 임포트 순서, 배치 스펙
+docs/               임포트 절차서, 임포트 순서, 배치 스펙, 이음선 제거
 ```
 
 ## 검증된 함정
@@ -69,6 +72,11 @@ docs/               임포트 절차서, 임포트 순서, 배치 스펙
   3.3 GB를 절약했다.
 - **`Model.WorldPivot`은 자식을 움직이지 않는다** (이 Studio 빌드 기준). 최종 보정은 각 MeshPart의
   CFrame에 동일한 강체 변환을 적용해야 한다.
+- **타일 경계는 파일이 연속이어도 선으로 보인다**: Studio가 메시마다 하늘광을 다르게 준다.
+  평평한 바닥일수록 심하다. 없애는 순서는 [`docs/TERRAIN_SEAMS.md`](docs/TERRAIN_SEAMS.md).
+- **메시를 바꾸면 `UnitExtent`도 바꾼다**: Studio는 `Size / UnitExtent`로 스케일한다.
+  `.ovdrjm`에서 `MeshId`만 갈아끼우면 옛 반크기가 남아 지형이 수십만 배로 늘어난다.
+- **텍스처 2048은 역효과**: Studio가 ~1024로 줄여 써서 오히려 흐려진다. 1024로 굽는다.
 - **재발행 금지**: 위의 2단계 구분 참조.
 
 ## 쓰는 법
