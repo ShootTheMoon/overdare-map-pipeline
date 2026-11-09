@@ -8,6 +8,9 @@ Blender에서 만든 대형 씬을 **OVERDARE Studio**(Roblox 계열 UGC 플랫�
 
 2026-09 산곡 II 이관에서 새로 확인된 규칙(좌표 거울상, 알파 무시, 모바일 ±1 km, 에셋 유실 복구)은 **[docs/LESSONS_SANGOK2.md](docs/LESSONS_SANGOK2.md)**.
 
+지형을 걸어다니게 만드는 법(쿼드트리 슬랩, 슬랩 높이, `Shape` 기본값, `canQuery`)은 **[docs/TERRAIN_COLLISION.md](docs/TERRAIN_COLLISION.md)**,
+규약이 의심스러울 때 뭘 해보는가는 **[docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)**.
+
 ## OVERDARE 하드 룰 (지키지 않으면 임포트가 조용히 실패한다)
 
 | 항목 | 값 |
@@ -56,7 +59,8 @@ blender/heritage/   국가유산청 스캔 전용 파이프라인
   ssw_live.py    소쇄원 (77 KB). KHS FBX 임포트(축 -Z/Y), OP 알파 배선,
                  height_at 기반 스캐터, 정점컬러 PBR — 이후 프로젝트가 재사용한 원본
 studio/recipes/     Studio 안에서 도는 Luau 레시피 (정렬, 충돌 프록시, 배치 보정)
-docs/               임포트 절차서, 임포트 순서, 배치 스펙
+docs/               임포트 절차서·순서, 배치 스펙, 산곡 II 실측 규칙,
+                    지형 콜리전, 진단 기법
 ```
 
 ## 검증된 함정
